@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Songlio 2 (Drumul Taberei edition)</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div id="setup">
+        <h1>🎵 Songlio 2 (Drumul Taberei edition)</h1>
+        <input id="nameInput" placeholder="Bagă-ți numele..." />
+        <button onclick="joinGame()">Join</button>
+      </div>
+
+      <div id="lobby" style="display: none">
+        <h2>Lobby</h2>
+        <ul id="playerList"></ul>
+        <button onclick="readyUp()">Sunt gata</button>
+      </div>
+
+      <div id="songChoice" style="display: none">
+        <h2>Alege o melodie pentru ceilalți</h2>
+        <input id="mySong" placeholder="YouTube link (ex: https://...)" />
+        <button onclick="submitSong()">Trimite melodia</button>
+      </div>
+
+      <div id="game" style="display: none">
+        <div id="videoResult" class="player"></div>
+        <input id="guessInput" placeholder="Ghicirea ta..." />
+        <button onclick="sendGuess()">Submit</button>
+        <ul id="results"></ul>
+      </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      let playerName = "";
+
+      function joinGame() {
+        playerName = document.getElementById("nameInput").value.trim();
+        if (!playerName) return alert("Scrie-ți un nume!");
+        socket.emit("join", playerName);
+        document.getElementById("setup").style.display = "none";
+        document.getElementById("lobby").style.display = "block";
+      }
+
+      function readyUp() {
+        socket.emit("ready");
+      }
+
+      function submitSong() {
+        const url = document.getElementById("mySong").value.trim();
+        if (!url.includes("youtube.com"))
+          return alert("Bagă un link valid YouTube!");
+        socket.emit("submitSong", url);
+        document.getElementById("songChoice").style.display = "none";
+      }
+
+      function sendGuess() {
+        const guess = document.getElementById("guessInput").value;
+        socket.emit("guess", `${playerName}: ${guess}`);
+      }
+
+      socket.on("playerList", (players) => {
+        const ul = document.getElementById("playerList");
+        ul.innerHTML = "";
+        players.forEach((p) => {
+          const li = document.createElement("li");
+          li.textContent = `${p.name} - ${
+            p.ready ? "✅ Ready" : "❌ Not ready"
+          }`;
+          ul.appendChild(li);
+        });
+      });
+
+      socket.on("startSongSelection", () => {
+        document.getElementById("lobby").style.display = "none";
+        document.getElementById("songChoice").style.display = "block";
+      });
+
+      socket.on("waitForOthers", () => {
+        document.getElementById("game").style.display = "block";
+        document.getElementById("videoResult").innerHTML =
+          "<p>Aștepți. E rândul tău.</p>";
+      });
+
+      socket.on("playSong", (data) => {
+        document.getElementById("game").style.display = "block";
+        const embed = data.url.replace("watch?v=", "embed/");
+        document.getElementById("videoResult").innerHTML = `
+        <iframe width="560" height="315" src="${embed}?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>
+        <p>🎵 Ghicește melodia aleasă de ${data.hostName}</p>
+      `;
+      });
+
+      socket.on("result", (msg) => {
+        const li = document.createElement("li");
+        li.textContent = msg;
+        document.getElementById("results").appendChild(li);
+      });
+
+      socket.on("gameOver", () => {
+        alert("🎉 Jocul s-a terminat!");
+        location.reload();
+      });
+    </script>
+  </body>
+</html>
