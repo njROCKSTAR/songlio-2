@@ -2,13 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Songlio 2 (Drumul Taberei edition)</title>
+    <title>Songlio NVD</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div class="container">
       <div id="setup">
-        <h1>🎵 Songlio 2 (Drumul Taberei edition)</h1>
+        <h1>🎵 Songlio NVD</h1>
         <input id="nameInput" placeholder="Bagă-ți numele..." />
         <button onclick="joinGame()">Join</button>
       </div>
@@ -16,20 +16,32 @@
       <div id="lobby" style="display: none">
         <h2>Lobby</h2>
         <ul id="playerList"></ul>
-        <button onclick="readyUp()">Sunt gata</button>
+        <button onclick="readyUp()">I'm Ready</button>
       </div>
 
       <div id="songChoice" style="display: none">
         <h2>Alege o melodie pentru ceilalți</h2>
-        <input id="mySong" placeholder="YouTube link (ex: https://...)" />
+        <input id="mySong" placeholder="YouTube link (ex: https://...)" /><br />
+        <input
+          id="myTitle"
+          placeholder="Numele melodiei (ce vor ghici ceilalți)"
+        /><br />
         <button onclick="submitSong()">Trimite melodia</button>
+        <p id="songTimer">⏱</p>
       </div>
 
       <div id="game" style="display: none">
         <div id="videoResult" class="player"></div>
-        <input id="guessInput" placeholder="Ghicirea ta..." />
-        <button onclick="sendGuess()">Submit</button>
+        <div id="guessSection">
+          <input id="guessInput" placeholder="Ghicirea ta..." />
+          <button onclick="sendGuess()">Submit</button>
+        </div>
         <ul id="results"></ul>
+      </div>
+
+      <div id="scoreTab" style="display: none">
+        <h3>🏆 Scoruri</h3>
+        <ul id="scoreBoard"></ul>
       </div>
     </div>
 
@@ -37,6 +49,8 @@
     <script>
       const socket = io();
       let playerName = "";
+      let hasGuessed = false;
+      let isMyTurn = false;
 
       function joinGame() {
         playerName = document.getElementById("nameInput").value.trim();
@@ -52,16 +66,35 @@
 
       function submitSong() {
         const url = document.getElementById("mySong").value.trim();
+        const title = document.getElementById("myTitle").value.trim();
         if (!url.includes("youtube.com"))
-          return alert("Bagă un link valid YouTube!");
-        socket.emit("submitSong", url);
+          return alert("Bagă un link YouTube valid!");
+        if (!title) return alert("Bagă un titlu de melodie!");
+        socket.emit("submitSong", { url, title });
         document.getElementById("songChoice").style.display = "none";
+        document.getElementById("videoResult").innerHTML = "";
+        document.getElementById("results").innerHTML = "";
       }
 
       function sendGuess() {
-        const guess = document.getElementById("guessInput").value;
+        if (hasGuessed || isMyTurn) return;
+        const guess = document.getElementById("guessInput").value.trim();
+        if (!guess) return;
         socket.emit("guess", `${playerName}: ${guess}`);
+        document.getElementById("guessInput").value = "";
       }
+
+      socket.on("restartClientUI", () => {
+        document.getElementById("setup").style.display = "none";
+        document.getElementById("lobby").style.display = "block";
+        document.getElementById("songChoice").style.display = "none";
+        document.getElementById("game").style.display = "none";
+        document.getElementById("scoreTab").style.display = "none";
+        document.getElementById("results").innerHTML = "";
+        document.getElementById("scoreBoard").innerHTML = "";
+        document.getElementById("videoResult").innerHTML = "";
+        document.getElementById("guessInput").value = "";
+      });
 
       socket.on("playerList", (players) => {
         const ul = document.getElementById("playerList");
@@ -78,32 +111,54 @@
       socket.on("startSongSelection", () => {
         document.getElementById("lobby").style.display = "none";
         document.getElementById("songChoice").style.display = "block";
+        document.getElementById("videoResult").innerHTML = "";
+        document.getElementById("results").innerHTML = "";
+        document.getElementById("guessInput").value = "";
       });
 
       socket.on("waitForOthers", () => {
         document.getElementById("game").style.display = "block";
         document.getElementById("videoResult").innerHTML =
           "<p>Aștepți. E rândul tău.</p>";
+        document.getElementById("guessSection").style.display = "none";
+        isMyTurn = true;
       });
 
       socket.on("playSong", (data) => {
         document.getElementById("game").style.display = "block";
+        document.getElementById("scoreTab").style.display = "block";
+        hasGuessed = false;
+        isMyTurn = false;
+
         const embed = data.url.replace("watch?v=", "embed/");
         document.getElementById("videoResult").innerHTML = `
-        <iframe width="560" height="315" src="${embed}?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>
+        <iframe width="0" height="0" src="${embed}?autoplay=1" frameborder="0" allow="autoplay" allowfullscreen></iframe>
         <p>🎵 Ghicește melodia aleasă de ${data.hostName}</p>
       `;
+        document.getElementById("guessSection").style.display = "block";
       });
 
       socket.on("result", (msg) => {
+        if (msg.includes("ghicit corect") && msg.includes(playerName)) {
+          hasGuessed = true;
+        }
         const li = document.createElement("li");
         li.textContent = msg;
         document.getElementById("results").appendChild(li);
       });
 
+      socket.on("scoreUpdate", (playerScores) => {
+        const list = document.getElementById("scoreBoard");
+        list.innerHTML = "";
+        playerScores.forEach((p) => {
+          const li = document.createElement("li");
+          li.textContent = `${p.name}: ${p.score} puncte`;
+          list.appendChild(li);
+        });
+      });
+
       socket.on("gameOver", () => {
-        alert("🎉 Jocul s-a terminat!");
-        location.reload();
+        socket.emit("restartGame");
       });
     </script>
   </body>

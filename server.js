@@ -12,19 +12,26 @@ let players = [];
 let playlist = [];
 let currentIndex = 0;
 let roundInProgress = false;
+let roundStartTime = 0;
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
   socket.on("join", (name) => {
-    players.push({ id: socket.id, name, ready: false, song: null });
+    players.push({
+      id: socket.id,
+      name,
+      ready: false,
+      song: null,
+      title: "",
+      score: 0,
+    });
     io.emit("playerList", players);
   });
 
   socket.on("ready", () => {
     const player = players.find((p) => p.id === socket.id);
     if (player) player.ready = true;
-
     io.emit("playerList", players);
 
     const allReady = players.length >= 2 && players.every((p) => p.ready);
@@ -33,11 +40,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("submitSong", (url) => {
+  socket.on("submitSong", ({ url, title }) => {
     const player = players.find((p) => p.id === socket.id);
-    if (player) player.song = url;
+    if (player) {
+      player.song = url;
+      player.title = title;
+    }
 
-    const allSubmitted = players.every((p) => p.song);
+    const allSubmitted = players.every((p) => p.song && p.title);
     if (allSubmitted && !roundInProgress) {
       playlist = [...players];
       currentIndex = 0;
@@ -46,7 +56,51 @@ io.on("connection", (socket) => {
   });
 
   socket.on("guess", (msg) => {
-    io.emit("result", msg);
+    const player = players.find((p) => p.id === socket.id);
+    const currentHost = playlist[currentIndex];
+    if (!player || !currentHost || player.id === currentHost.id) return;
+
+    const normalize = (text) =>
+      text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[^\w\s]/g, "")
+        .trim();
+
+    const guessText = normalize(msg.replace(`${player.name}:`, "").trim());
+    const correctAnswer = normalize(currentHost.title);
+
+    if (!player.hasGuessedCorrectly && guessText.includes(correctAnswer)) {
+      const seconds = Math.floor((Date.now() - roundStartTime) / 1000);
+      const points = Math.max(20, 100 - seconds * 2);
+      player.score += points;
+      player.hasGuessedCorrectly = true;
+
+      io.emit("result", `${player.name} a ghicit corect! +${points} puncte`);
+      io.emit(
+        "scoreUpdate",
+        players.map((p) => ({
+          name: p.name,
+          score: p.score,
+        }))
+      );
+    } else {
+      io.emit("result", msg);
+    }
+  });
+
+  socket.on("restartGame", () => {
+    players.forEach((p) => {
+      p.ready = false;
+      p.song = null;
+      p.title = "";
+      p.hasGuessedCorrectly = false;
+    });
+    playlist = [];
+    currentIndex = 0;
+    roundInProgress = false;
+    io.emit("playerList", players);
+    io.emit("restartClientUI");
   });
 
   socket.on("disconnect", () => {
@@ -57,14 +111,14 @@ io.on("connection", (socket) => {
 
 function startNextRound() {
   roundInProgress = true;
+  roundStartTime = Date.now();
+
+  players.forEach((p) => (p.hasGuessedCorrectly = false));
 
   const host = playlist[currentIndex];
   const others = players.filter((p) => p.id !== host.id);
 
-  // Host așteaptă
   io.to(host.id).emit("waitForOthers");
-
-  // Ceilalți primesc melodia
   others.forEach((p) => {
     io.to(p.id).emit("playSong", {
       url: host.song,
@@ -72,7 +126,6 @@ function startNextRound() {
     });
   });
 
-  // După 20 secunde trece la următorul
   setTimeout(() => {
     currentIndex++;
     if (currentIndex < playlist.length) {
@@ -80,12 +133,21 @@ function startNextRound() {
     } else {
       io.emit("gameOver");
       roundInProgress = false;
-      players.forEach((p) => {
-        p.ready = false;
-        p.song = null;
-      });
-      playlist = [];
-      currentIndex = 0;
+
+      // Afișează clasamentul 7 secunde, apoi revine la lobby
+      setTimeout(() => {
+        players.forEach((p) => {
+          p.ready = false;
+          p.song = null;
+          p.title = "";
+          p.hasGuessedCorrectly = false;
+          p.score = 0;
+        });
+        playlist = [];
+        currentIndex = 0;
+        io.emit("playerList", players);
+        io.emit("restartClientUI");
+      }, 7000);
     }
   }, 20000);
 }
